@@ -39,7 +39,7 @@ npm install
 ### 3. Configure Environment
 
 ```bash
-cp .env.local.example .env.local
+cp .env.example .env.local
 ```
 
 Edit `.env.local` with your values:
