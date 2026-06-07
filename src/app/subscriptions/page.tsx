@@ -50,6 +50,7 @@ export default function SubscriptionsPage() {
   const [linkData, setLinkData] = useState({
     slot_number: 1,
     invite_link: '',
+    initial_link: '', // store initial link to detect changes
   });
 
   const [sendData, setSendData] = useState({
@@ -184,15 +185,28 @@ export default function SubscriptionsPage() {
     setAssignModalOpen(true);
   };
 
-  const openLinkManagement = (sub: Subscription) => {
+  const openLinkManagement = async (sub: Subscription) => {
     setSelectedSub(sub);
-    fetchSlotDetails(sub.id);
+    const slots = await fetchSlotDetails(sub.id);
+    // Set first slot's link as initial
+    const firstSlot = slots.find((s: SlotData) => s.slot_number === 1);
+    setLinkData({
+      slot_number: 1,
+      invite_link: firstSlot?.invite_link || '',
+      initial_link: firstSlot?.invite_link || '',
+    });
     setLinkModalOpen(true);
   };
 
-  const openSendLink = (sub: Subscription) => {
+  const openSendLink = async (sub: Subscription) => {
     setSelectedSub(sub);
-    fetchSlotDetails(sub.id);
+    const slots = await fetchSlotDetails(sub.id);
+    // Find first slot with link to auto-select
+    const slotWithLink = slots.find((s: SlotData) => s.invite_link);
+    setSendData({
+      slot_number: slotWithLink?.slot_number || 1,
+      method: 'telegram',
+    });
     setSendLinkModalOpen(true);
   };
 
@@ -220,10 +234,20 @@ export default function SubscriptionsPage() {
       if (res.ok) {
         setAssignModalOpen(false);
         setAssignData({ customer_id: '', slot_number: 1 });
+        // Refresh slot data and update subscriptionSlots
+        const slots = await fetchSlotDetails(selectedSub.id);
+        setSubscriptionSlots(prev => ({
+          ...prev,
+          [selectedSub.id]: slots,
+        }));
         fetchSubscriptions();
+      } else {
+        const error = await res.json();
+        alert(`Gagal assign customer: ${error.message || 'Unknown error'}`);
       }
     } catch (err) {
       console.error('Gagal assign customer:', err);
+      alert('Gagal assign customer. Silakan coba lagi.');
     }
   };
 
@@ -241,9 +265,8 @@ export default function SubscriptionsPage() {
       });
 
       if (res.ok) {
-        alert(`Link untuk slot ${linkData.slot_number} berhasil disimpan!`);
         setLinkModalOpen(false);
-        setLinkData({ slot_number: 1, invite_link: '' });
+        setLinkData({ slot_number: 1, invite_link: '', initial_link: '' });
         // Refresh slot data
         const slots = await fetchSlotDetails(selectedSub.id);
         // Update subscriptionSlots for this subscription
@@ -253,7 +276,7 @@ export default function SubscriptionsPage() {
         }));
         // Update slot detail modal if open
         if (slotDetailModalOpen && selectedSlotDetail) {
-          const updatedSlot = slots.find(s => s.slot_number === selectedSlotDetail.slot_number);
+          const updatedSlot = slots.find((s: SlotData) => s.slot_number === selectedSlotDetail.slot_number);
           if (updatedSlot) setSelectedSlotDetail(updatedSlot);
         }
         fetchSubscriptions();
@@ -509,12 +532,26 @@ export default function SubscriptionsPage() {
             <label className="block text-base font-semibold text-slate-800 mb-2">Pilih Slot</label>
             <select
               value={linkData.slot_number}
-              onChange={(e) => setLinkData({ ...linkData, slot_number: parseInt(e.target.value) })}
+              onChange={(e) => {
+                const newSlot = parseInt(e.target.value);
+                const slotInfo = selectedSlots.find((s: SlotData) => s.slot_number === newSlot);
+                setLinkData({
+                  ...linkData,
+                  slot_number: newSlot,
+                  invite_link: slotInfo?.invite_link || '',
+                  initial_link: slotInfo?.invite_link || '',
+                });
+              }}
               className="w-full px-3 py-2 border-2 border-slate-300 rounded-lg text-black focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
             >
-              {Array.from({ length: selectedSub?.service?.total_slots || 6 }, (_, i) => i + 1).map((slot) => (
-                <option key={slot} value={slot}>Slot {slot}</option>
-              ))}
+              {Array.from({ length: selectedSub?.service?.total_slots || 6 }, (_, i) => i + 1).map((slot) => {
+                const slotInfo = selectedSlots.find((s: SlotData) => s.slot_number === slot);
+                return (
+                  <option key={slot} value={slot}>
+                    Slot {slot} {slotInfo?.invite_link ? '- ✓ Link Ada' : slotInfo?.is_occupied ? '- Terpakai' : '- Kosong'}
+                  </option>
+                );
+              })}
             </select>
           </div>
 
@@ -544,18 +581,42 @@ export default function SubscriptionsPage() {
             <select
               value={sendData.slot_number}
               onChange={(e) => setSendData({ ...sendData, slot_number: parseInt(e.target.value) })}
-              className="w-full px-3 py-2 border-2 border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+              className="w-full px-3 py-2 border-2 border-slate-300 rounded-lg text-black focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
             >
               {Array.from({ length: selectedSub?.service?.total_slots || 6 }, (_, i) => i + 1).map((slot) => {
-                const slotInfo = selectedSlots.find(s => s.slot_number === slot);
+                const slotInfo = selectedSlots.find((s: SlotData) => s.slot_number === slot);
                 return (
                   <option key={slot} value={slot}>
-                    Slot {slot} {slotInfo?.is_occupied ? `- ${slotInfo.customer?.name || 'Terpakai'}` : '- Kosong'}
+                    Slot {slot} {slotInfo?.invite_link ? '- ✓ Link Ada' : slotInfo?.is_occupied ? `- ${slotInfo.customer?.name || 'Terpakai'}` : '- Kosong'}
                   </option>
                 );
               })}
             </select>
           </div>
+
+          {/* Show link preview */}
+          {(() => {
+            const selectedSlot = selectedSlots.find((s: SlotData) => s.slot_number === sendData.slot_number);
+            if (selectedSlot?.invite_link) {
+              return (
+                <div className="bg-blue-50 p-4 rounded-xl border-2 border-blue-200">
+                  <p className="text-sm text-slate-600 mb-2">Link Invite</p>
+                  <input
+                    type="text"
+                    readOnly
+                    value={selectedSlot.invite_link}
+                    className="w-full px-3 py-2 bg-white border-2 border-slate-300 rounded-lg text-sm text-black"
+                  />
+                </div>
+              );
+            }
+            return (
+              <div className="bg-amber-50 p-4 rounded-xl border-2 border-amber-200">
+                <p className="text-amber-700 text-sm">⚠️ Slot ini belum memiliki link invite.</p>
+                <p className="text-amber-600 text-xs mt-1">Klik "Kelola Link" untuk menambahkan link terlebih dahulu.</p>
+              </div>
+            );
+          })()}
 
           <div>
             <label className="block text-base font-semibold text-slate-800 mb-2">Metode Pengiriman</label>
@@ -587,16 +648,33 @@ export default function SubscriptionsPage() {
             </div>
           </div>
 
-          <div className="bg-blue-50 p-4 rounded-xl border-2 border-blue-200">
-            <p className="text-base text-blue-800">
-              <strong>Catatan:</strong> Untuk mengirim link, Anda perlu mengklik slot di bawah dan menyalin link invite, lalu mengirim secara manual ke customer via {sendData.method === 'telegram' ? 'Telegram' : 'WhatsApp'}.
-            </p>
-          </div>
-
           <div className="flex justify-end gap-3 pt-4">
             <Button variant="secondary" onClick={() => setSendLinkModalOpen(false)} type="button">
               Tutup
             </Button>
+            {(() => {
+              const selectedSlot = selectedSlots.find((s: SlotData) => s.slot_number === sendData.slot_number);
+              if (selectedSlot?.invite_link) {
+                return (
+                  <Button
+                    onClick={() => {
+                      const link = selectedSlot.invite_link;
+                      const message = encodeURIComponent(`Hai! Berikut link invite kamu:\n${link}`);
+                      if (sendData.method === 'telegram') {
+                        // For Telegram, we just open web.telegram.org
+                        window.open(`https://web.telegram.org/k/#?text=${message}`, '_blank');
+                      } else {
+                        window.open(`https://wa.me/?text=${message}`, '_blank');
+                      }
+                    }}
+                  >
+                    <Send className="w-4 h-4 mr-2" />
+                    Kirim via {sendData.method === 'telegram' ? 'Telegram' : 'WhatsApp'}
+                  </Button>
+                );
+              }
+              return null;
+            })()}
           </div>
         </div>
       </Modal>
@@ -604,11 +682,13 @@ export default function SubscriptionsPage() {
       {/* Slot Detail Modal */}
       <Modal isOpen={slotDetailModalOpen} onClose={() => setSlotDetailModalOpen(false)} title={`Detail Slot ${selectedSlotDetail?.slot_number}`}>
         <div className="space-y-5">
-          <div className={`p-4 rounded-xl border-2 ${selectedSlotDetail?.is_occupied ? 'bg-emerald-50 border-emerald-300' : 'bg-slate-50 border-slate-200'}`}>
+          <div className={`p-4 rounded-xl border-2 ${selectedSlotDetail?.is_occupied ? 'bg-emerald-50 border-emerald-300' : selectedSlotDetail?.invite_link ? 'bg-blue-50 border-blue-300' : 'bg-slate-50 border-slate-200'}`}>
             <div className="flex items-center justify-between mb-4">
               <h3 className="font-bold text-xl text-slate-800">Slot {selectedSlotDetail?.slot_number}</h3>
               {selectedSlotDetail?.is_occupied ? (
                 <Badge variant="success">Terpakai</Badge>
+              ) : selectedSlotDetail?.invite_link ? (
+                <Badge variant="info">Link Tersedia</Badge>
               ) : (
                 <Badge variant="default">Kosong</Badge>
               )}
@@ -643,7 +723,7 @@ export default function SubscriptionsPage() {
                     type="text"
                     readOnly
                     value={selectedSlotDetail.invite_link}
-                    className="flex-1 px-3 py-2 bg-white border-2 border-slate-300 rounded-lg text-sm"
+                    className="flex-1 px-3 py-2 bg-white border-2 border-slate-300 rounded-lg text-sm text-black"
                   />
                   <Button
                     variant="secondary"
