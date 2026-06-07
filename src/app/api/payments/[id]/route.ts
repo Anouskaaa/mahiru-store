@@ -1,0 +1,92 @@
+import { NextResponse } from 'next/server';
+import { supabaseAdmin } from '@/lib/supabase';
+import { successResponse, errorResponse } from '@/lib/api';
+import type { Payment } from '@/types';
+
+interface RouteParams {
+  params: Promise<{ id: string }>;
+}
+
+// GET /api/payments/[id] - Get a single payment
+export async function GET(request: Request, { params }: RouteParams) {
+  try {
+    const { id } = await params;
+
+    const { data, error } = await supabaseAdmin
+      .from('payments')
+      .select(`
+        *,
+        customer_subscription:customer_subscriptions(
+          customer:customers(*),
+          subscription:subscriptions(
+            service:services(*)
+          )
+        )
+      `)
+      .eq('id', id)
+      .single();
+
+    if (error) {
+      if (error.code === 'PGRST116') {
+        return errorResponse('Payment not found', 404);
+      }
+      throw error;
+    }
+
+    return successResponse(data as Payment);
+  } catch (err) {
+    console.error('Error fetching payment:', err);
+    return errorResponse('Failed to fetch payment');
+  }
+}
+
+// PUT /api/payments/[id] - Update a payment
+export async function PUT(request: Request, { params }: RouteParams) {
+  try {
+    const { id } = await params;
+    const body = await request.json();
+
+    const updateData: Partial<Payment> = {};
+
+    if (body.amount !== undefined) updateData.amount = body.amount;
+    if (body.status !== undefined) updateData.status = body.status;
+    if (body.due_date !== undefined) updateData.due_date = body.due_date;
+    if (body.paid_date !== undefined) updateData.paid_date = body.paid_date;
+    if (body.payment_method !== undefined) updateData.payment_method = body.payment_method;
+    if (body.transaction_ref !== undefined) updateData.transaction_ref = body.transaction_ref;
+    if (body.notes !== undefined) updateData.notes = body.notes;
+
+    const { data, error } = await supabaseAdmin
+      .from('payments')
+      .update(updateData)
+      .eq('id', id)
+      .select()
+      .single();
+
+    if (error) throw error;
+
+    return successResponse(data as Payment, 'Payment updated successfully');
+  } catch (err) {
+    console.error('Error updating payment:', err);
+    return errorResponse('Failed to update payment');
+  }
+}
+
+// DELETE /api/payments/[id] - Delete a payment
+export async function DELETE(request: Request, { params }: RouteParams) {
+  try {
+    const { id } = await params;
+
+    const { error } = await supabaseAdmin
+      .from('payments')
+      .delete()
+      .eq('id', id);
+
+    if (error) throw error;
+
+    return successResponse(null, 'Payment deleted successfully');
+  } catch (err) {
+    console.error('Error deleting payment:', err);
+    return errorResponse('Failed to delete payment');
+  }
+}
