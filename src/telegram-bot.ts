@@ -2,11 +2,14 @@
  * Telegram Bot for Mahiru Store Dashboard
  *
  * This bot handles customer interactions via Telegram.
+ *
  * Commands:
  *   /start - Register with the bot
+ *   /order - Order a new subscription (generates QRIS)
  *   /status - Check subscription status
  *   /link - Request an invite link
  *   /renewal - Check renewal dates
+ *   /cekbayar - Check QRIS payment status
  *   /help - Show available commands
  *
  * Setup:
@@ -34,8 +37,14 @@ if (!TOKEN) {
 // Initialize bot
 const bot = new TelegramBot(TOKEN, { polling: true });
 
-console.log('🤖 Shuuush Telegram Bot started!');
+console.log('🤖 Mahiru Store Telegram Bot started!');
 console.log(`📡 Connected to API at: ${API_BASE}`);
+
+// Store pending orders (chatId -> order data)
+const pendingOrders = new Map();
+
+// Store generated QRIS data (chatId -> qris data)
+const qrisData = new Map();
 
 // Helper function to call our API
 async function apiCall(endpoint: string, options: RequestInit = {}) {
@@ -60,52 +69,301 @@ function formatCurrency(amount: number) {
   return `Rp ${Number(amount).toLocaleString('id-ID')}`;
 }
 
-// /start command - Welcome message and registration
+// === /start command ===
 bot.onText(/\/start/, async (msg: any) => {
   const chatId = msg.chat.id;
   const telegramId = msg.from.id.toString();
+  const firstName = msg.from.first_name || 'Customer';
 
   const welcomeMessage = `
-👋 Welcome to Mahirustore
+👋 Halo ${firstName}! Selamat datang di Mahiru Store
 
-I'm here to help you manage your subscriptions.
+Saya di sini untuk membantu kamu memesan langganan premium dengan mudah.
 
-Available commands:
-/start - Show this message
-/status - Check your subscription status
-/link [service] - Request an invite link
-/renewal - Check upcoming renewals
-/help - Show all commands
+📋 Fitur yang tersedia:
+• /order - Pesan langganan baru (QRIS)
+• /status - Cek status langganan kamu
+• /link - Minta link invite
+• /renewal - Cek tanggal perpanjangan
+• /cekbayar - Cek status pembayaran QRIS
+• /help - Lihat semua perintah
 
-To get started, make sure you've been registered by the admin.
+💡 Cukup ketik /order untuk mulai memesan!
   `;
 
   bot.sendMessage(chatId, welcomeMessage);
 });
 
-// /help command - Show all commands
+// === /help command ===
 bot.onText(/\/help/, (msg: any) => {
   const chatId = msg.chat.id;
 
   const helpMessage = `
-📚 Available Commands
+📚 Perintah yang Tersedia
 
-• /start - Welcome message
-• /status - Check your subscription status
-• /link [service] - Request an invite link
-  Examples:
-  /link spotify_family
-  /link apple_music_family
-• /renewal - Check upcoming renewals
-• /help - Show this help message
+🛒 /order - Pesan langganan baru
+   Gunakan ini untuk memesan layanan baru
+   Pembayaran via QRIS otomatis
 
-Need assistance? Contact the admin!
+📋 /status - Cek status langganan
+   Lihat langganan aktif kamu
+
+🔗 /link - Minta link invite
+   Usage: /link [nama_layanan]
+   Contoh: /link spotify_family
+
+📅 /renewal - Cek perpanjangan
+   Lihat tanggal perpanjangan
+
+💳 /cekbayar - Cek pembayaran
+   Cek status pembayaran QRIS kamu
+
+❓ /help - Tampilkan pesan ini
+
+Butuh bantuan? Hubungi admin!
   `;
 
   bot.sendMessage(chatId, helpMessage);
 });
 
-// /status command - Check subscription status
+// === /order command - Order subscription with QRIS ===
+bot.onText(/\/order/, async (msg: any) => {
+  const chatId = msg.chat.id;
+  const telegramId = msg.from.id.toString();
+
+  bot.sendMessage(chatId, '⏳ Mengambil daftar layanan...');
+
+  // Get available services
+  const result = await apiCall('/api/services');
+
+  if (result.error || !result.data) {
+    bot.sendMessage(chatId, '❌ Gagal mengambil daftar layanan. Coba lagi nanti.');
+    return;
+  }
+
+  const services = result.data.filter((s: any) => s.is_active);
+
+  if (services.length === 0) {
+    bot.sendMessage(chatId, '❌ Saat ini belum ada layanan tersedia.');
+    return;
+  }
+
+  // Store services for this user
+  pendingOrders.set(chatId, { step: 'select_service', services });
+
+  let message = `🛒 Pesan Langganan Baru\n\n`;
+  message += `Pilih layanan yang kamu inginkan:\n\n`;
+
+  services.forEach((service: any, index: number) => {
+    message += `${index + 1}. ${service.display_name}\n`;
+    message += `   💰 Harga: ${formatCurrency(service.resale_price)}\n`;
+    message += `   📦 Slot: ${service.total_slots}\n\n`;
+  });
+
+  message += `\nBalas dengan nomor layanan (1-${services.length})`;
+
+  // Create inline keyboard for quick selection
+  const keyboard = {
+    inline_keyboard: services.map((service: any, index: number) => [
+      { text: `${index + 1}. ${service.display_name} - ${formatCurrency(service.resale_price)}`, callback_data: `order_${index}` }
+    ])
+  };
+
+  bot.sendMessage(chatId, message, { reply_markup: keyboard });
+});
+
+// Handle callback query from inline keyboard
+bot.on('callback_query', async (query: any) => {
+  const chatId = query.message.chat.id;
+  const data = query.data;
+  const telegramId = query.from.id.toString();
+
+  if (data.startsWith('order_')) {
+    const index = parseInt(data.replace('order_', ''));
+    const orderData = pendingOrders.get(chatId);
+
+    if (!orderData || !orderData.services) {
+      bot.answerCallbackQuery(query.id, { text: '❌ Sesi expired. Ketik /order lagi.' });
+      return;
+    }
+
+    const service = orderData.services[index];
+    if (!service) {
+      bot.answerCallbackQuery(query.id, { text: '❌ Layanan tidak ditemukan.' });
+      return;
+    }
+
+    // Confirm selection
+    bot.answerCallbackQuery(query.id, { text: `Memproses ${service.display_name}...` });
+
+    const confirmMessage = `
+🎉 Layanan Dipilih
+
+📦 ${service.display_name}
+💰 Total: ${formatCurrency(service.resale_price)}
+
+Konfirmasi pemesanan?
+`;
+
+    // Store selected service
+    pendingOrders.set(chatId, {
+      ...orderData,
+      step: 'confirm',
+      selectedService: service
+    });
+
+    const keyboard = {
+      inline_keyboard: [
+        [
+          { text: '✅ Ya, Pesan', callback_data: 'confirm_yes' },
+          { text: '❌ Batal', callback_data: 'confirm_no' }
+        ]
+      ]
+    };
+
+    bot.sendMessage(chatId, confirmMessage, { reply_markup: keyboard });
+  }
+
+  if (data === 'confirm_yes') {
+    const orderData = pendingOrders.get(chatId);
+    if (!orderData?.selectedService) {
+      bot.answerCallbackQuery(query.id, { text: '❌ Sesi expired. Ketik /order lagi.' });
+      return;
+    }
+
+    const service = orderData.selectedService;
+    bot.answerCallbackQuery(query.id, { text: '⏳ Membuat QRIS...' });
+
+    // Create QRIS payment
+    const qrisResult = await apiCall('/api/telegram/create-order', {
+      method: 'POST',
+      body: JSON.stringify({
+        telegram_id: telegramId,
+        service_id: service.id,
+        amount: service.resale_price
+      })
+    });
+
+    if (qrisResult.error) {
+      bot.sendMessage(chatId, `❌ Gagal membuat QRIS: ${qrisResult.message || 'Unknown error'}`);
+      return;
+    }
+
+    // Store QRIS data for this user
+    const qris = qrisResult.data;
+    qrisData.set(chatId, qris);
+    pendingOrders.delete(chatId);
+
+    // Send QRIS info
+    const qrisMessage = `
+💳 QRIS Pembayaran
+
+📦 Layanan: ${service.display_name}
+💰 Total: ${formatCurrency(qris.total_to_pay)}
+
+⏰ Expired: ${new Date(qris.expired_at).toLocaleString('id-ID')}
+
+Silakan scan QR code di bawah ini untuk membayar.
+Setelah membayar, ketik /cekbayar untuk verifikasi.
+`;
+
+    bot.sendMessage(chatId, qrisMessage);
+
+    // Send QR code image
+    if (qris.qr_string) {
+      const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(qris.qr_string)}`;
+      bot.sendPhoto(chatId, qrImageUrl, {
+        caption: '📱 Scan QR code di atas untuk pembayaran'
+      });
+    }
+
+    // Send payment link as backup
+    if (qris.link) {
+      bot.sendMessage(chatId, `🔗 Atau buka link pembayaran: ${qris.link}`, {
+        reply_markup: {
+          inline_keyboard: [[
+            { text: '💳 Bayar Sekarang', url: qris.link }
+          ]]
+        }
+      });
+    }
+  }
+
+  if (data === 'confirm_no') {
+    pendingOrders.delete(chatId);
+    bot.answerCallbackQuery(query.id, { text: 'Pesanan dibatalkan.' });
+    bot.sendMessage(chatId, '❌ Pesanan dibatalkan.\n\nKetik /order untuk memesan lagi.');
+  }
+});
+
+// === /cekbayar command - Check QRIS payment status ===
+bot.onText(/\/cekbayar/, async (msg: any) => {
+  const chatId = msg.chat.id;
+  const telegramId = msg.from.id.toString();
+
+  const qris = qrisData.get(chatId);
+
+  if (!qris) {
+    bot.sendMessage(chatId, `
+💳 Cek Pembayaran
+
+Tidak ada pembayaran aktif.
+Ketik /order untuk membuat pesanan baru.
+`);
+    return;
+  }
+
+  bot.sendMessage(chatId, '⏳ Mengecek status pembayaran...');
+
+  const result = await apiCall(`/api/telegram/check-payment?transaction_id=${qris.transaction_id}`);
+
+  if (result.error) {
+    bot.sendMessage(chatId, `❌ Gagal mengecek pembayaran: ${result.message || 'Unknown error'}`);
+    return;
+  }
+
+  const status = result.data.status;
+
+  if (status === 'success' || status === 'paid') {
+    qrisData.delete(chatId);
+
+    // Get invite link
+    const linkResult = await apiCall(`/api/telegram/get-link/${telegramId}`);
+
+    const successMessage = `
+✅ PEMBAYARAN BERHASIL!
+
+🎉 Selamat! Langganan kamu sudah aktif.
+
+${linkResult.data?.invite_link ? `🔗 Link Invite:\n${linkResult.data.invite_link}` : 'Link invite akan dikirim oleh admin.'}
+`;
+
+    bot.sendMessage(chatId, successMessage, {
+      reply_markup: linkResult.data?.invite_link ? {
+        inline_keyboard: [[
+          { text: '🔗 Buka Link Invite', url: linkResult.data.invite_link }
+        ]]
+      } : undefined
+    });
+  } else if (status === 'pending') {
+    bot.sendMessage(chatId, `
+⏳ Pembayaran Masih Pending
+
+QRIS belum dibayar.
+Silakan scan QR code dan lakukan pembayaran.
+Setelah membayar, tunggu 1-2 menit lalu ketik /cekbayar lagi.
+`);
+  } else {
+    bot.sendMessage(chatId, `
+❌ Pembayaran Gagal atau Kadaluarsa
+
+Silakan buat pesanan baru dengan /order.
+`);
+    qrisData.delete(chatId);
+  }
+});
+
+// === /status command - Check subscription status ===
 bot.onText(/\/status/, async (msg: any) => {
   const chatId = msg.chat.id;
   const telegramId = msg.from.id.toString();
@@ -123,20 +381,20 @@ bot.onText(/\/status/, async (msg: any) => {
   const subscriptions = customer.active_subscriptions;
 
   if (!subscriptions || subscriptions.length === 0) {
-    bot.sendMessage(chatId, `📭 You don't have any active subscriptions yet.`);
+    bot.sendMessage(chatId, `📭 Kamu belum memiliki langganan aktif.\n\nKetik /order untuk memesan!`);
     return;
   }
 
-  let message = `📋 Your Subscriptions\n\n`;
+  let message = `📋 Langganan Aktif Kamu\n\n`;
 
   for (const sub of subscriptions) {
     message += `🎵 ${sub.service}\n`;
     message += `   Slot: #${sub.slot_number}\n`;
-    message += `   Status: ${sub.status}\n`;
+    message += `   Status: ✅ Aktif\n`;
 
     if (sub.next_payment) {
       message += `   Next Payment: ${formatCurrency(sub.next_payment.amount)}\n`;
-      message += `   Due: ${new Date(sub.next_payment.due_date).toLocaleDateString()}\n`;
+      message += `   Due: ${new Date(sub.next_payment.due_date).toLocaleDateString('id-ID')}\n`;
     }
 
     message += `\n`;
@@ -145,7 +403,7 @@ bot.onText(/\/status/, async (msg: any) => {
   bot.sendMessage(chatId, message);
 });
 
-// /link command - Request invite link
+// === /link command - Request invite link ===
 bot.onText(/\/link(?:\s+(.+))?/, async (msg: any, match: any) => {
   const chatId = msg.chat.id;
   const telegramId = msg.from.id.toString();
@@ -153,13 +411,13 @@ bot.onText(/\/link(?:\s+(.+))?/, async (msg: any, match: any) => {
 
   if (!serviceName) {
     bot.sendMessage(chatId, `
-📤 Request Invite Link
+📤 Minta Link Invite
 
-Usage: /link [service_name]
+Usage: /link [nama_layanan]
 
-Example: /link spotify_family
+Contoh: /link spotify_family
 
-Available services:
+Layanan tersedia:
 • spotify_family
 • apple_music_family
 • canva_pro
@@ -169,7 +427,7 @@ Available services:
     return;
   }
 
-  bot.sendMessage(chatId, '⏳ Looking for available slots...');
+  bot.sendMessage(chatId, '⏳ Mencari slot yang tersedia...');
 
   const result = await apiCall('/api/telegram/request-link', {
     method: 'POST',
@@ -185,29 +443,29 @@ Available services:
   }
 
   const inviteMessage = `
-✅ Here's your invite link!
+✅ Link Invite Kamu!
 
-Service: ${result.service}
+Layanan: ${result.service}
 Link: ${result.invite_link}
 
-${result.message || 'Click the link to join!'}
+${result.message || 'Klik link untuk bergabung!'}
   `;
 
   bot.sendMessage(chatId, inviteMessage, {
     reply_markup: {
       inline_keyboard: [[
-        { text: 'Open Link', url: result.invite_link }
+        { text: '🔗 Buka Link', url: result.invite_link }
       ]]
     }
   });
 });
 
-// /renewal command - Check renewal dates
+// === /renewal command - Check renewal dates ===
 bot.onText(/\/renewal/, async (msg: any) => {
   const chatId = msg.chat.id;
   const telegramId = msg.from.id.toString();
 
-  bot.sendMessage(chatId, '⏳ Checking renewal dates...');
+  bot.sendMessage(chatId, '⏳ Mengecek tanggal perpanjangan...');
 
   const result = await apiCall(`/api/telegram/renewal/${telegramId}`);
 
@@ -219,20 +477,67 @@ bot.onText(/\/renewal/, async (msg: any) => {
   const { subscriptions } = result.data;
 
   if (!subscriptions || subscriptions.length === 0) {
-    bot.sendMessage(chatId, `📭 You don't have any active subscriptions.`);
+    bot.sendMessage(chatId, `📭 Kamu belum memiliki langganan aktif.`);
     return;
   }
 
-  let message = `📅 Upcoming Renewals\n\n`;
+  let message = `📅 Tanggal Perpanjangan\n\n`;
 
   for (const sub of subscriptions) {
     const emoji = sub.status === 'urgent' ? '🔴' : sub.status === 'soon' ? '🟡' : '🟢';
     message += `${emoji} ${sub.service}\n`;
-    message += `   Renewal: ${new Date(sub.renewal_date).toLocaleDateString()}\n`;
-    message += `   In: ${sub.days_until_renewal} days\n\n`;
+    message += `   Perpanjangan: ${new Date(sub.renewal_date).toLocaleDateString('id-ID')}\n`;
+    message += `   Dalam: ${sub.days_until_renewal} hari\n\n`;
   }
 
   bot.sendMessage(chatId, message);
+});
+
+// === Handle text input (for order flow) ===
+bot.on('message', (msg: any) => {
+  // Ignore commands and non-text messages
+  if (msg.text?.startsWith('/')) return;
+  if (msg.text === undefined) return;
+
+  const chatId = msg.chat.id;
+  const orderData = pendingOrders.get(chatId);
+
+  if (orderData?.step === 'select_service' && orderData.services) {
+    const index = parseInt(msg.text) - 1;
+    const service = orderData.services[index];
+
+    if (!service) {
+      bot.sendMessage(chatId, '❌ Pilihan tidak valid. Pilih angka 1-' + orderData.services.length);
+      return;
+    }
+
+    // Show confirmation
+    pendingOrders.set(chatId, {
+      ...orderData,
+      step: 'confirm',
+      selectedService: service
+    });
+
+    const confirmMessage = `
+🎉 Layanan Dipilih
+
+📦 ${service.display_name}
+💰 Total: ${formatCurrency(service.resale_price)}
+
+Konfirmasi pemesanan?
+`;
+
+    const keyboard = {
+      inline_keyboard: [
+        [
+          { text: '✅ Ya, Pesan', callback_data: 'confirm_yes' },
+          { text: '❌ Batal', callback_data: 'confirm_no' }
+        ]
+      ]
+    };
+
+    bot.sendMessage(chatId, confirmMessage, { reply_markup: keyboard });
+  }
 });
 
 // Error handling
