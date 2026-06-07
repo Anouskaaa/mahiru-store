@@ -26,6 +26,7 @@ export default function SubscriptionsPage() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedSub, setSelectedSub] = useState<Subscription | null>(null);
   const [selectedSlots, setSelectedSlots] = useState<SlotData[]>([]);
+  const [subscriptionSlots, setSubscriptionSlots] = useState<Record<string, SlotData[]>>({});
   const [assignModalOpen, setAssignModalOpen] = useState(false);
   const [linkModalOpen, setLinkModalOpen] = useState(false);
   const [sendLinkModalOpen, setSendLinkModalOpen] = useState(false);
@@ -63,6 +64,23 @@ export default function SubscriptionsPage() {
       if (res.ok) {
         const data = await res.json();
         setSubscriptions(data.data);
+        // Fetch slot details for each subscription
+        const slotPromises = data.data.map(async (sub: Subscription) => {
+          try {
+            const slotRes = await fetch(`/api/subscriptions/${sub.id}/slots`);
+            if (slotRes.ok) {
+              const slotData = await slotRes.json();
+              return { id: sub.id, slots: slotData.data?.slots || [] };
+            }
+          } catch (err) {
+            console.error('Gagal fetch slot:', err);
+          }
+          return { id: sub.id, slots: [] };
+        });
+        const slotResults = await Promise.all(slotPromises);
+        const slotMap: Record<string, SlotData[]> = {};
+        slotResults.forEach(r => { slotMap[r.id] = r.slots; });
+        setSubscriptionSlots(slotMap);
       }
     } catch (err) {
       console.error('Gagal mengambil langganan:', err);
@@ -94,16 +112,19 @@ export default function SubscriptionsPage() {
     }
   };
 
-  const fetchSlotDetails = async (subId: string) => {
+  const fetchSlotDetails = async (subId: string): Promise<SlotData[]> => {
     try {
       const res = await fetch(`/api/subscriptions/${subId}/slots`);
       if (res.ok) {
         const data = await res.json();
-        setSelectedSlots(data.data?.slots || []);
+        const slots = data.data?.slots || [];
+        setSelectedSlots(slots);
+        return slots;
       }
     } catch (err) {
       console.error('Gagal mengambil detail slot:', err);
     }
+    return [];
   };
 
   useEffect(() => {
@@ -177,8 +198,8 @@ export default function SubscriptionsPage() {
 
   const viewSlotDetail = async (sub: Subscription, slot: number) => {
     setSelectedSub(sub);
-    await fetchSlotDetails(sub.id);
-    const slotData = selectedSlots.find(s => s.slot_number === slot);
+    const slots = await fetchSlotDetails(sub.id);
+    const slotData = slots.find(s => s.slot_number === slot);
     setSelectedSlotDetail(slotData || null);
     setSlotDetailModalOpen(true);
   };
@@ -209,21 +230,40 @@ export default function SubscriptionsPage() {
   const handleAddLink = async () => {
     if (!selectedSub) return;
 
-    // First get available slots for this subscription
     try {
-      const res = await fetch(`/api/subscriptions/${selectedSub.id}/slots`);
-      if (res.ok) {
-        const data = await res.json();
-        const slotData = data.data;
+      const res = await fetch(`/api/subscriptions/${selectedSub.id}/slots`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          slot_number: linkData.slot_number,
+          invite_link: linkData.invite_link,
+        }),
+      });
 
-        // If slot has no customer yet, we need to first create customer subscription
-        // Or if slot already has customer, we just update the link
-        alert(`Link untuk slot ${linkData.slot_number} akan disimpan`);
+      if (res.ok) {
+        alert(`Link untuk slot ${linkData.slot_number} berhasil disimpan!`);
         setLinkModalOpen(false);
         setLinkData({ slot_number: 1, invite_link: '' });
+        // Refresh slot data
+        const slots = await fetchSlotDetails(selectedSub.id);
+        // Update subscriptionSlots for this subscription
+        setSubscriptionSlots(prev => ({
+          ...prev,
+          [selectedSub.id]: slots,
+        }));
+        // Update slot detail modal if open
+        if (slotDetailModalOpen && selectedSlotDetail) {
+          const updatedSlot = slots.find(s => s.slot_number === selectedSlotDetail.slot_number);
+          if (updatedSlot) setSelectedSlotDetail(updatedSlot);
+        }
+        fetchSubscriptions();
+      } else {
+        const error = await res.json();
+        alert(`Gagal menyimpan link: ${error.message || 'Unknown error'}`);
       }
     } catch (err) {
       console.error('Gagal menambahkan link:', err);
+      alert('Gagal menyimpan link. Silakan coba lagi.');
     }
   };
 
@@ -316,28 +356,38 @@ export default function SubscriptionsPage() {
                   <div className="flex flex-wrap gap-3">
                     {Array.from({ length: stats.total }, (_, i) => i + 1).map((slot) => {
                       const isOccupied = slot <= stats.used;
+                      const slotDetail = subscriptionSlots[sub.id]?.find(s => s.slot_number === slot);
+                      const hasLink = slotDetail?.invite_link;
                       return (
                         <div
                           key={slot}
                           className={`w-full md:w-56 p-4 rounded-xl border-2 cursor-pointer hover:shadow-lg transition-all ${
                             isOccupied
                               ? 'bg-emerald-50 border-emerald-300 hover:border-emerald-500'
-                              : 'bg-slate-50 border-slate-200 hover:border-blue-400'
+                              : hasLink
+                                ? 'bg-blue-50 border-blue-300 hover:border-blue-500'
+                                : 'bg-slate-50 border-slate-200 hover:border-blue-400'
                           }`}
                           onClick={() => viewSlotDetail(sub, slot)}
                         >
                           <div className="flex items-center justify-between mb-2">
-                            <span className={`font-bold text-lg ${isOccupied ? 'text-emerald-700' : 'text-slate-500'}`}>
+                            <span className={`font-bold text-lg ${
+                              isOccupied ? 'text-emerald-700' : hasLink ? 'text-blue-700' : 'text-slate-500'
+                            }`}>
                               Slot {slot}
                             </span>
                             {isOccupied ? (
                               <Check className="w-5 h-5 text-emerald-500" />
+                            ) : hasLink ? (
+                              <LinkIcon className="w-5 h-5 text-blue-500" />
                             ) : (
                               <span className="text-sm text-slate-400">Kosong</span>
                             )}
                           </div>
                           {isOccupied ? (
                             <p className="text-sm text-emerald-600 font-medium">Terpakai - Klik untuk detail</p>
+                          ) : hasLink ? (
+                            <p className="text-sm text-blue-600 font-medium">Link Tersedia - Klik untuk detail</p>
                           ) : (
                             <p className="text-sm text-slate-500">Klik untuk tambah link</p>
                           )}
@@ -407,7 +457,7 @@ export default function SubscriptionsPage() {
               value={formData.notes}
               onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
               rows={2}
-              className="w-full px-3 py-2 border-2 border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+              className="w-full px-3 py-2 border-2 border-slate-300 rounded-lg text-black focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
             />
           </div>
           <div className="flex justify-end gap-3 pt-4">
@@ -460,7 +510,7 @@ export default function SubscriptionsPage() {
             <select
               value={linkData.slot_number}
               onChange={(e) => setLinkData({ ...linkData, slot_number: parseInt(e.target.value) })}
-              className="w-full px-3 py-2 border-2 border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+              className="w-full px-3 py-2 border-2 border-slate-300 rounded-lg text-black focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
             >
               {Array.from({ length: selectedSub?.service?.total_slots || 6 }, (_, i) => i + 1).map((slot) => (
                 <option key={slot} value={slot}>Slot {slot}</option>
