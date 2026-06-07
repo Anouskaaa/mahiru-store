@@ -2,8 +2,20 @@
 
 import { useEffect, useState } from 'react';
 import { Table, Badge, Button, Modal, Input, Select } from '@/components/ui';
-import { Plus, DollarSign, AlertTriangle, CheckCircle, Clock } from 'lucide-react';
+import { Plus, DollarSign, AlertTriangle, CheckCircle, Clock, QrCode, Copy, ExternalLink, RefreshCw } from 'lucide-react';
+import { QRCodeSVG } from 'qrcode.react';
 import type { Payment } from '@/types';
+
+interface QRISPaymentData {
+  transaction_id: string;
+  reff_id: string;
+  qr_string: string;
+  link: string;
+  amount: number;
+  total_to_pay: number;
+  expired_at: string;
+  status: string;
+}
 
 export default function PaymentsPage() {
   const [payments, setPayments] = useState<Payment[]>([]);
@@ -11,6 +23,12 @@ export default function PaymentsPage() {
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState<string>('');
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [qrisModalOpen, setQrisModalOpen] = useState(false);
+  const [selectedPayment, setSelectedPayment] = useState<Payment | null>(null);
+  const [qrisData, setQrisData] = useState<QRISPaymentData | null>(null);
+  const [creatingQRIS, setCreatingQRIS] = useState(false);
+  const [checkingStatus, setCheckingStatus] = useState(false);
+  const [copiedQRIS, setCopiedQRIS] = useState(false);
   const [formData, setFormData] = useState({
     customer_subscription_id: '',
     amount: '',
@@ -81,6 +99,89 @@ export default function PaymentsPage() {
       }
     } catch (err) {
       console.error('Gagal membuat pembayaran:', err);
+    }
+  };
+
+  const openQRISPayment = async (payment: Payment) => {
+    setSelectedPayment(payment);
+    setQrisData(null);
+    setQrisModalOpen(true);
+  };
+
+  const createQRISPayment = async () => {
+    if (!selectedPayment) return;
+
+    setCreatingQRIS(true);
+    try {
+      // If payment already has qris_data, use that
+      const existingQRIS = (selectedPayment as any).qris_data;
+      if (existingQRIS && existingQRIS.qr_string) {
+        setQrisData({
+          transaction_id: selectedPayment.transaction_ref || existingQRIS.transaction_id,
+          reff_id: existingQRIS.reff_id,
+          qr_string: existingQRIS.qr_string,
+          link: existingQRIS.link,
+          amount: existingQRIS.amount || selectedPayment.amount,
+          total_to_pay: existingQRIS.total_to_pay || selectedPayment.amount,
+          expired_at: existingQRIS.expired_at,
+          status: 'pending',
+        });
+        setCreatingQRIS(false);
+        return;
+      }
+
+      // Create new QRIS payment
+      const res = await fetch('/api/payments/qris/create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          payment_id: selectedPayment.id,
+          amount: Math.ceil(Number(selectedPayment.amount) / 1000) * 1000, // Round to nearest 1000
+        }),
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        setQrisData(data.data);
+      } else {
+        const error = await res.json();
+        alert(`Gagal membuat QRIS: ${error.message}`);
+      }
+    } catch (err) {
+      console.error('Gagal membuat QRIS:', err);
+      alert('Gagal membuat QRIS. Silakan coba lagi.');
+    }
+    setCreatingQRIS(false);
+  };
+
+  const checkQRISStatus = async () => {
+    if (!qrisData?.transaction_id) return;
+
+    setCheckingStatus(true);
+    try {
+      const res = await fetch(`/api/payments/qris/check?transaction_id=${qrisData.transaction_id}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.data.status === 'success') {
+          alert('Pembayaran berhasil! QRIS sudah dibayar.');
+          setQrisModalOpen(false);
+          fetchPayments();
+          fetchSummary();
+        } else {
+          alert(`Status: ${data.data.status}. Silakan bayar terlebih dahulu.`);
+        }
+      }
+    } catch (err) {
+      console.error('Gagal cek status:', err);
+    }
+    setCheckingStatus(false);
+  };
+
+  const copyQRString = () => {
+    if (qrisData?.qr_string) {
+      navigator.clipboard.writeText(qrisData.qr_string);
+      setCopiedQRIS(true);
+      setTimeout(() => setCopiedQRIS(false), 2000);
     }
   };
 
@@ -186,6 +287,7 @@ export default function PaymentsPage() {
           {payments.map((payment) => {
             const badge = getStatusBadge(payment.status);
             const StatusIcon = badge.icon;
+            const hasQRIS = (payment as any).qris_data?.qr_string;
 
             return (
               <tr key={payment.id} className="hover:bg-blue-50">
@@ -208,9 +310,18 @@ export default function PaymentsPage() {
                   </Badge>
                 </td>
                 <td className="px-6 py-5">
-                  <Button variant="ghost" size="sm" className="font-semibold">
-                    Lihat
-                  </Button>
+                  <div className="flex gap-2">
+                    {payment.status !== 'paid' && (
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        onClick={() => openQRISPayment(payment)}
+                      >
+                        <QrCode className="w-4 h-4 mr-1" />
+                        QRIS
+                      </Button>
+                    )}
+                  </div>
                 </td>
               </tr>
             );
@@ -258,6 +369,7 @@ export default function PaymentsPage() {
                 { value: 'whatsapp', label: 'WhatsApp' },
                 { value: 'transfer', label: 'Transfer Bank' },
                 { value: 'tunai', label: 'Tunai' },
+                { value: 'qris', label: 'QRIS' },
               ]}
             />
             <Input
@@ -281,6 +393,115 @@ export default function PaymentsPage() {
             <Button type="submit">Catat Pembayaran</Button>
           </div>
         </form>
+      </Modal>
+
+      {/* QRIS Payment Modal */}
+      <Modal
+        isOpen={qrisModalOpen}
+        onClose={() => setQrisModalOpen(false)}
+        title={`QRIS - Rp ${selectedPayment ? Number(selectedPayment.amount).toLocaleString('id-ID') : ''}`}
+      >
+        <div className="space-y-5">
+          {!qrisData ? (
+            <div className="text-center py-8">
+              <QrCode className="w-16 h-16 mx-auto mb-4 text-blue-500" />
+              <p className="text-lg text-slate-700 mb-2">Generate QRIS untuk pembayaran ini</p>
+              <p className="text-sm text-slate-500 mb-6">QRIS akan expire dalam 24 jam</p>
+              <Button onClick={createQRISPayment} disabled={creatingQRIS}>
+                {creatingQRIS ? (
+                  <>
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2" />
+                    Membuat QRIS...
+                  </>
+                ) : (
+                  <>
+                    <QrCode className="w-4 h-4 mr-2" />
+                    Generate QRIS
+                  </>
+                )}
+              </Button>
+            </div>
+          ) : (
+            <>
+              {/* QR Code Display */}
+              <div className="bg-white p-6 rounded-xl border-2 border-slate-200 text-center">
+                <p className="text-sm text-slate-600 mb-3">Scan QR code di bawah ini</p>
+                <div className="inline-block bg-white p-4 rounded-xl border border-slate-300">
+                  <QRCodeSVG
+                    value={qrisData.qr_string}
+                    size={256}
+                    level="H"
+                    includeMargin
+                  />
+                </div>
+                <p className="text-lg font-bold text-blue-700 mt-4">
+                  Total: Rp {qrisData.total_to_pay.toLocaleString('id-ID')}
+                </p>
+                {qrisData.expired_at && (
+                  <p className="text-sm text-slate-500 mt-2">
+                    Expired: {new Date(qrisData.expired_at).toLocaleString('id-ID')}
+                  </p>
+                )}
+              </div>
+
+              {/* QR String */}
+              <div className="bg-slate-50 p-4 rounded-xl">
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-sm text-slate-600">QR String</p>
+                  <button
+                    onClick={copyQRString}
+                    className="text-blue-600 hover:text-blue-700 flex items-center gap-1 text-sm"
+                  >
+                    {copiedQRIS ? <CheckCircle className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
+                    {copiedQRIS ? 'Tersalin!' : 'Salin'}
+                  </button>
+                </div>
+                <input
+                  type="text"
+                  readOnly
+                  value={qrisData.qr_string}
+                  className="w-full px-3 py-2 bg-white border border-slate-300 rounded-lg text-xs text-slate-600 font-mono"
+                />
+              </div>
+
+              {/* Actions */}
+              <div className="flex gap-3">
+                {qrisData.link && (
+                  <Button
+                    variant="secondary"
+                    onClick={() => window.open(qrisData.link, '_blank')}
+                  >
+                    <ExternalLink className="w-4 h-4 mr-2" />
+                    Buka Link Pembayaran
+                  </Button>
+                )}
+                <Button
+                  variant="secondary"
+                  onClick={checkQRISStatus}
+                  disabled={checkingStatus}
+                >
+                  {checkingStatus ? (
+                    <>
+                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600 mr-2" />
+                      Mengecek...
+                    </>
+                  ) : (
+                    <>
+                      <RefreshCw className="w-4 h-4 mr-2" />
+                      Cek Status Pembayaran
+                    </>
+                  )}
+                </Button>
+              </div>
+            </>
+          )}
+
+          <div className="flex justify-end pt-4">
+            <Button variant="secondary" onClick={() => setQrisModalOpen(false)}>
+              Tutup
+            </Button>
+          </div>
+        </div>
       </Modal>
     </div>
   );
