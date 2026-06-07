@@ -57,7 +57,7 @@ async function apiCall(endpoint: string, options: RequestInit = {}) {
 
 // Format currency
 function formatCurrency(amount: number) {
-  return `$${Number(amount).toFixed(2)}`;
+  return `Rp ${Number(amount).toLocaleString('id-ID')}`;
 }
 
 // /start command - Welcome message and registration

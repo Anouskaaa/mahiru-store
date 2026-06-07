@@ -68,7 +68,7 @@ export async function POST(request: Request) {
       .insert({
         customer_subscription_id: body.customer_subscription_id,
         amount: body.amount,
-        currency: body.currency || 'USD',
+        currency: body.currency || 'IDR',
         status: body.paid_date ? 'paid' : 'pending',
         due_date: body.due_date,
         paid_date: body.paid_date,

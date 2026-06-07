@@ -13,11 +13,11 @@ import {
 
 const navItems = [
   { href: '/', label: 'Dashboard', icon: LayoutDashboard },
-  { href: '/customers', label: 'Customers', icon: Users },
-  { href: '/services', label: 'Services', icon: Package },
-  { href: '/subscriptions', label: 'Subscriptions', icon: Layers },
-  { href: '/payments', label: 'Payments', icon: CreditCard },
-  { href: '/settings', label: 'Settings', icon: Settings },
+  { href: '/customers', label: 'Pelanggan', icon: Users },
+  { href: '/services', label: 'Layanan', icon: Package },
+  { href: '/subscriptions', label: 'Langganan', icon: Layers },
+  { href: '/payments', label: 'Pembayaran', icon: CreditCard },
+  { href: '/settings', label: 'Pengaturan', icon: Settings },
 ];
 
 export function Sidebar() {
