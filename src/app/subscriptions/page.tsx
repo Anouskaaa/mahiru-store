@@ -212,6 +212,18 @@ export default function SubscriptionsPage() {
 
   const viewSlotDetail = async (sub: Subscription, slot: number) => {
     setSelectedSub(sub);
+
+    // Check if we have cached slot data
+    const cachedSlots = subscriptionSlots[sub.id];
+    if (cachedSlots && cachedSlots.length > 0) {
+      const slotData = cachedSlots.find(s => s.slot_number === slot);
+      setSelectedSlotDetail(slotData || null);
+      setSelectedSlots(cachedSlots);
+      setSlotDetailModalOpen(true);
+      return;
+    }
+
+    // If no cached data, fetch from API
     const slots = await fetchSlotDetails(sub.id);
     const slotData = slots.find(s => s.slot_number === slot);
     setSelectedSlotDetail(slotData || null);
