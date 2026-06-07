@@ -10,7 +10,7 @@ const XOFTWARE_API_KEY = process.env.XOFTWARE_API_KEY || '';
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { telegram_id, service_id, amount } = body;
+    const { telegram_id, service_id, amount, whatsapp } = body;
 
     if (!telegram_id || !service_id || !amount) {
       return errorResponse('telegram_id, service_id, and amount are required', 400);
@@ -30,6 +30,7 @@ export async function POST(request: Request) {
         .insert({
           name: `Customer_${telegram_id}`,
           telegram_id: telegram_id,
+          whatsapp: whatsapp || null,
         })
         .select()
         .single();
@@ -59,6 +60,17 @@ export async function POST(request: Request) {
       return errorResponse('Xoftware API key not configured', 500);
     }
 
+    // Determine sender - prefer telegram username with @ prefix, then telegram_id
+    let sender = telegram_id;
+    if (customer.telegram_username) {
+      sender = `@${customer.telegram_username}`;
+    } else if (customer.whatsapp) {
+      // Clean up WhatsApp number (remove non-digits)
+      sender = customer.whatsapp.replace(/[^0-9]/g, '');
+    }
+
+    console.log('Creating QRIS with sender:', sender);
+
     const xoftwareResponse = await fetch(`${XOFTWARE_API_URL}/qris`, {
       method: 'POST',
       headers: {
@@ -66,7 +78,7 @@ export async function POST(request: Request) {
         'X-API-Key': XOFTWARE_API_KEY,
       },
       body: JSON.stringify({
-        sender: telegram_id,
+        sender: sender,
         code: 'QRIS',
         quantity: 1,
         amount: roundedAmount,
@@ -75,7 +87,26 @@ export async function POST(request: Request) {
 
     const xoftwareData = await xoftwareResponse.json();
 
-    if (!xoftwareResponse.ok || !xoftwareData.success || !xoftwareData.data) {
+    // Handle specific Xoftware errors
+    if (!xoftwareData.success) {
+      console.error('Xoftware API error:', xoftwareData);
+
+      // Check for "User not found" error
+      if (xoftwareData.error === 'User not found') {
+        return NextResponse.json(
+          {
+            success: false,
+            error: 'Sender tidak ditemukan di sistem Xoftware. Pastikan Anda sudah terdaftar di Xoftware atau gunakan nomor WhatsApp yang valid.',
+            xoftware_error: xoftwareData.error
+          },
+          { status: 400 }
+        );
+      }
+
+      return errorResponse(xoftwareData.error || 'Failed to create QRIS payment', 500);
+    }
+
+    if (!xoftwareResponse.ok || !xoftwareData.data) {
       console.error('Xoftware API error:', xoftwareData);
       return errorResponse(xoftwareData.error || 'Failed to create QRIS payment', 500);
     }
