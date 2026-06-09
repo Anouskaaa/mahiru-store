@@ -25,7 +25,7 @@ const TelegramBot = require('node-telegram-bot-api');
 
 // Configuration
 const TOKEN = process.env.TELEGRAM_BOT_TOKEN;
-const API_BASE = process.env.API_BASE_URL || 'http://localhost:3000';
+const API_BASE = 'https://backend-s2.xoftware.id/v1/';
 
 // Validate token
 if (!TOKEN) {
