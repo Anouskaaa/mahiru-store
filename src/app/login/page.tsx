@@ -23,7 +23,8 @@ export default function LoginPage() {
       });
 
       if (res.ok) {
-        router.push('/');
+        window.location.href = '/';
+        
       } else {
         const data = await res.json();
         setError(data.error || 'Password salah');
