@@ -5,18 +5,18 @@ export function middleware(request: NextRequest) {
   const session = request.cookies.get('admin_session');
   const pathname = request.nextUrl.pathname;
 
-  // Allow login page and static files
+  // Allow: login page, API routes, static files
   if (
     pathname.startsWith('/login') ||
+    pathname.startsWith('/api/') ||
     pathname.startsWith('/_next') ||
     pathname.startsWith('/favicon') ||
-    pathname.startsWith('/api/auth') ||
     pathname.includes('.')
   ) {
     return NextResponse.next();
   }
 
-  // Check session
+  // Check session for protected pages
   if (!session || session.value !== 'authenticated') {
     const loginUrl = new URL('/login', request.url);
     loginUrl.searchParams.set('redirect', pathname);
