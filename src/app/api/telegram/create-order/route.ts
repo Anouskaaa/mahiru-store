@@ -79,9 +79,12 @@ export async function POST(request: Request) {
       }),
     });
 
+    // const registerData = await registerResponse.json();
+    // console.log('Register response:', registerData);
     const registerData = await registerResponse.json();
     console.log('Register response:', registerData);
-
+    console.log('Register status:', registerResponse.status);
+    console.log('Sender used:', sender);
     // Even if registration fails (user already exists), continue to create QRIS
 
     // Step 2: Create QRIS
