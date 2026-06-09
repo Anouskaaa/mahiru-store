@@ -61,7 +61,7 @@ export async function POST(request: Request) {
     }
 
     // Determine sender - use telegram_id as sender
-    const sender = whatsapp || telegram_id;
+    const sender = `telegram:${telegram_id}`;
 
     console.log('Creating QRIS with sender:', sender);
 
