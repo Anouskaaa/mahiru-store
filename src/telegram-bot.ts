@@ -245,7 +245,7 @@ Konfirmasi pemesanan?
     });
 
     if (qrisResult.error) {
-      bot.sendMessage(chatId, `❌ Gagal membuat QRIS: ${qrisResult.message || 'Unknown error'}`);
+      bot.sendMessage(chatId, `❌ Gagal membuat QRIS: ${qrisResult.error || 'Unknown error'}`);
       return;
     }
 
