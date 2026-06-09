@@ -3,7 +3,7 @@ import { supabaseAdmin } from '@/lib/supabase';
 import { successResponse, errorResponse } from '@/lib/api';
 
 // Xoftware API Configuration
-const XOFTWARE_API_URL = 'https://backend-s2.xoftware.id/v1/order';
+const XOFTWARE_API_URL = 'https://backend-s2.xoftware.id/v1';
 const XOFTWARE_API_KEY = process.env.XOFTWARE_API_KEY || '';
 
 // POST /api/telegram/create-order - Create order and generate QRIS

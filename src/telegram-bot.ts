@@ -25,7 +25,7 @@ const TelegramBot = require('node-telegram-bot-api');
 
 // Configuration
 const TOKEN = process.env.TELEGRAM_BOT_TOKEN;
-const API_BASE = 'https://backend-s2.xoftware.id/v1/';
+const API_BASE = process.env.API_BASE_URL || 'http://localhost:3000';
 
 // Validate token
 if (!TOKEN) {
@@ -49,7 +49,7 @@ const qrisData = new Map();
 // Helper function to call our API
 async function apiCall(endpoint: string, options: RequestInit = {}) {
   try {
-    const url = `${API_BASE}${endpoint}`;
+    const url = `${API_BASE.replace(/\/$/, '')}${endpoint}`;
     const response = await fetch(url, {
       ...options,
       headers: {
