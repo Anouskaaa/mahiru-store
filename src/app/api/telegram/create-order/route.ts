@@ -10,7 +10,7 @@ const XOFTWARE_API_KEY = process.env.XOFTWARE_API_KEY || '';
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { telegram_id, service_id, amount, whatsapp } = body;
+    const { telegram_id, service_id, amount, whatsapp, name } = body;
 
     if (!telegram_id || !service_id || !amount) {
       return errorResponse('telegram_id, service_id, and amount are required', 400);
@@ -28,7 +28,7 @@ export async function POST(request: Request) {
       const { data: newCustomer, error: createError } = await supabaseAdmin
         .from('customers')
         .insert({
-          name: `Customer_${telegram_id}`,
+          name: name || `Customer_${telegram_id}`,
           telegram_id: telegram_id,
           whatsapp: whatsapp || null,
         })
@@ -60,17 +60,31 @@ export async function POST(request: Request) {
       return errorResponse('Xoftware API key not configured', 500);
     }
 
-    // Determine sender - prefer telegram username with @ prefix, then telegram_id
-    let sender = telegram_id;
-    if (customer.telegram_username) {
-      sender = `@${customer.telegram_username}`;
-    } else if (customer.whatsapp) {
-      // Clean up WhatsApp number (remove non-digits)
-      sender = customer.whatsapp.replace(/[^0-9]/g, '');
-    }
+    // Determine sender - use telegram_id as sender
+    const sender = telegram_id;
 
     console.log('Creating QRIS with sender:', sender);
 
+    // Step 1: Register user first (if not exists)
+    console.log('Registering user to Xoftware...');
+    const registerResponse = await fetch(`${XOFTWARE_API_URL}/register`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-API-Key': XOFTWARE_API_KEY,
+      },
+      body: JSON.stringify({
+        sender: sender,
+        name: customer.name || `User_${telegram_id}`,
+      }),
+    });
+
+    const registerData = await registerResponse.json();
+    console.log('Register response:', registerData);
+
+    // Even if registration fails (user already exists), continue to create QRIS
+
+    // Step 2: Create QRIS
     const xoftwareResponse = await fetch(`${XOFTWARE_API_URL}/qris`, {
       method: 'POST',
       headers: {
