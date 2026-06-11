@@ -1,10 +1,30 @@
-import { NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
 import { successResponse, errorResponse } from '@/lib/api';
 
 // Xoftware API Configuration
 const XOFTWARE_API_URL = 'https://backend-s2.xoftware.id/v1/order';
 const XOFTWARE_API_KEY = process.env.XOFTWARE_API_KEY || '';
+
+type TelegramPaymentData = {
+  id: string;
+  amount: number | string;
+  status: string;
+  transaction_ref: string | null;
+  customer_subscription?: {
+    id: string;
+    subscription_id: string;
+    slot_number: number;
+    subscription?: {
+      service?: {
+        display_name?: string;
+      };
+    };
+  };
+};
+
+type XoftwareStatusResponse = {
+  status?: string;
+};
 
 // GET /api/telegram/check-payment - Check QRIS payment status
 export async function GET(request: Request) {
@@ -17,7 +37,7 @@ export async function GET(request: Request) {
       return errorResponse('transaction_id or telegram_id is required', 400);
     }
 
-    let paymentData: any = null;
+    let paymentData: TelegramPaymentData | null = null;
 
     // Find payment by transaction_id or telegram_id
     if (transaction_id) {
@@ -28,7 +48,7 @@ export async function GET(request: Request) {
         .single();
 
       if (payment) {
-        paymentData = payment;
+        paymentData = payment as unknown as TelegramPaymentData;
       }
     }
 
@@ -50,7 +70,7 @@ export async function GET(request: Request) {
           .limit(1);
 
         if (payments && payments.length > 0) {
-          paymentData = payments[0];
+          paymentData = payments[0] as unknown as TelegramPaymentData;
         }
       }
     }
@@ -71,7 +91,7 @@ export async function GET(request: Request) {
         }
       );
 
-      const xoftwareData = await xoftwareResponse.json();
+      const xoftwareData = await xoftwareResponse.json() as XoftwareStatusResponse;
 
       if (xoftwareResponse.ok && xoftwareData.status) {
         // Update local payment status

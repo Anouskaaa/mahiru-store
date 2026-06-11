@@ -1,7 +1,35 @@
-import { NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
 import { successResponse, errorResponse } from '@/lib/api';
 import type { Payment } from '@/types';
+
+type PaymentWithQRIS = Payment & {
+  qris_data?: {
+    reff_id?: string;
+    qr_string?: string;
+    link?: string;
+    amount?: number;
+    total_to_pay?: number;
+    expired_at?: string;
+  };
+};
+
+function attachQRISData<T extends { notes?: string | null }>(payment: T): T {
+  if (!payment.notes) return payment;
+
+  try {
+    const parsed = JSON.parse(payment.notes) as { qris_data?: PaymentWithQRIS['qris_data'] };
+    if (parsed.qris_data) {
+      return {
+        ...payment,
+        qris_data: parsed.qris_data,
+      };
+    }
+  } catch {
+    // Notes can be plain text for non-QRIS payments.
+  }
+
+  return payment;
+}
 
 interface RouteParams {
   params: Promise<{ id: string }>;
@@ -33,7 +61,7 @@ export async function GET(request: Request, { params }: RouteParams) {
       throw error;
     }
 
-    return successResponse(data as Payment);
+    return successResponse(attachQRISData(data) as PaymentWithQRIS);
   } catch (err) {
     console.error('Error fetching payment:', err);
     return errorResponse('Failed to fetch payment');

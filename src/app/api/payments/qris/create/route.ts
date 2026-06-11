@@ -1,4 +1,3 @@
-import { NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
 import { successResponse, errorResponse } from '@/lib/api';
 
@@ -9,7 +8,6 @@ const XOFTWARE_API_KEY = process.env.XOFTWARE_API_KEY || '';
 interface QRISRequestBody {
   payment_id: string;
   amount: number;
-  customer_name?: string;
 }
 
 interface XoftwareQRISResponse {
@@ -31,10 +29,14 @@ interface XoftwareQRISResponse {
 export async function POST(request: Request) {
   try {
     const body: QRISRequestBody = await request.json();
-    const { payment_id, amount, customer_name } = body;
+    const { payment_id, amount } = body;
 
     if (!payment_id || !amount) {
       return errorResponse('payment_id and amount are required', 400);
+    }
+
+    if (!XOFTWARE_API_KEY) {
+      return errorResponse('Xoftware API key not configured', 500);
     }
 
     // Validate amount (minimum 10.000 IDR for QRIS)
@@ -47,7 +49,12 @@ export async function POST(request: Request) {
       .from('payments')
       .select(`
         *,
-        customer:customers(id, name, telegram_username, whatsapp)
+        customer_subscription:customer_subscriptions(
+          customer:customers(id, name, telegram_username, whatsapp),
+          subscription:subscriptions(
+            service:services(display_name)
+          )
+        )
       `)
       .eq('id', payment_id)
       .single();
@@ -57,10 +64,12 @@ export async function POST(request: Request) {
     }
 
     // Prepare sender identifier (use telegram or whatsapp)
-    const sender = payment.customer?.telegram_username ||
-                   payment.customer?.whatsapp ||
-                   payment.customer?.name ||
-                   'unknown';
+    const customer = payment.customer_subscription?.customer;
+    const serviceName = payment.customer_subscription?.subscription?.service?.display_name;
+    const sender = customer?.telegram_username ||
+                   customer?.whatsapp ||
+                   customer?.name ||
+                   `payment:${payment_id}`;
 
     // Create QRIS order via Xoftware API
     const xoftwareResponse = await fetch(`${XOFTWARE_API_URL}/qris`, {
@@ -85,9 +94,9 @@ export async function POST(request: Request) {
     }
 
     // Update payment with QRIS transaction details
-    const updateData = {
-      transaction_ref: xoftwareData.data.transaction_id,
-      payment_method: 'qris',
+    const notes = JSON.stringify({
+      customer_id: customer?.id,
+      service_name: serviceName,
       qris_data: {
         reff_id: xoftwareData.data.reff_id,
         qr_string: xoftwareData.data.qr_string,
@@ -96,9 +105,15 @@ export async function POST(request: Request) {
         total_to_pay: xoftwareData.data.total_to_pay,
         expired_at: xoftwareData.data.expired_at,
       },
+    });
+
+    const updateData = {
+      transaction_ref: xoftwareData.data.transaction_id,
+      payment_method: 'qris',
+      notes,
     };
 
-    const { data: updatedPayment, error: updateError } = await supabaseAdmin
+    const { error: updateError } = await supabaseAdmin
       .from('payments')
       .update(updateData)
       .eq('id', payment_id)

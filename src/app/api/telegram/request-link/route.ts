@@ -1,6 +1,14 @@
 import { NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
-import { successResponse, errorResponse } from '@/lib/api';
+import { errorResponse } from '@/lib/api';
+
+type ServiceSubscription = {
+  id: string;
+  invite_link: string | null;
+  service?: {
+    total_slots?: number;
+  };
+};
 
 // POST /api/telegram/request-link - Request an invite link via Telegram
 export async function POST(request: Request) {
@@ -52,8 +60,8 @@ export async function POST(request: Request) {
     }
 
     // Find subscription with available slots
-    for (const sub of subscriptions) {
-      const totalSlots = (sub as any).service?.total_slots || 6;
+    for (const sub of subscriptions as unknown as ServiceSubscription[]) {
+      const totalSlots = sub.service?.total_slots || 6;
 
       // Get occupied slots count
       const { data: occupiedSlots } = await supabaseAdmin

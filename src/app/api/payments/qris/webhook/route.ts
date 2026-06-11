@@ -1,4 +1,3 @@
-import { NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
 import { successResponse, errorResponse } from '@/lib/api';
 
@@ -38,17 +37,18 @@ export async function POST(request: Request) {
 
     console.log('Xoftware webhook received:', JSON.stringify(payload, null, 2));
 
-    // Find payment by transaction_ref or reff_id
-    const searchRef = payload.reff_id || payload.transaction_id;
+    // Find payment by transaction_ref. We store transaction_id, but some callbacks
+    // include reff_id as the first useful reference, so try both.
+    const searchRefs = [payload.transaction_id, payload.reff_id].filter(Boolean);
 
     const { data: payment, error: findError } = await supabaseAdmin
       .from('payments')
-      .select('id, status, customer_id')
-      .eq('transaction_ref', searchRef)
+      .select('id, status, customer_subscription_id')
+      .in('transaction_ref', searchRefs)
       .single();
 
     if (findError || !payment) {
-      console.log('Payment not found for webhook:', searchRef);
+      console.log('Payment not found for webhook:', searchRefs.join(', '));
       // Still return success to acknowledge receipt
       return successResponse({ received: true, message: 'Payment not found' });
     }
@@ -61,12 +61,18 @@ export async function POST(request: Request) {
           .from('payments')
           .update({
             status: 'paid',
-            paid_at: new Date().toISOString(),
+            paid_date: new Date().toISOString().split('T')[0],
             notes: payload.accounts
               ? `Account: ${JSON.stringify(payload.accounts)}`
               : undefined,
           })
           .eq('id', payment.id);
+
+        await supabaseAdmin
+          .from('customer_subscriptions')
+          .update({ status: 'active' })
+          .eq('id', payment.customer_subscription_id)
+          .eq('status', 'pending');
 
         console.log(`Payment ${payment.id} marked as paid via webhook`);
       }

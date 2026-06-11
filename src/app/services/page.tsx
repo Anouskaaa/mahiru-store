@@ -34,6 +34,7 @@ export default function ServicesPage() {
   };
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchServices();
   }, []);
 

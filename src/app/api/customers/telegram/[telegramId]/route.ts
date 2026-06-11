@@ -7,6 +7,10 @@ interface RouteParams {
   params: Promise<{ telegramId: string }>;
 }
 
+type CustomerWithSubscriptions = Customer & {
+  subscriptions: unknown[];
+};
+
 // GET /api/customers/telegram/[telegramId] - Find customer by Telegram ID
 export async function GET(request: Request, { params }: RouteParams) {
   try {
@@ -44,7 +48,7 @@ export async function GET(request: Request, { params }: RouteParams) {
     return successResponse({
       ...data,
       subscriptions: subscriptions || [],
-    } as Customer & { subscriptions: any[] });
+    } as CustomerWithSubscriptions);
   } catch (err) {
     console.error('Error finding customer by telegram:', err);
     return errorResponse('Failed to find customer');

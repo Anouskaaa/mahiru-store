@@ -129,6 +129,7 @@ export default function SubscriptionsPage() {
   };
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchSubscriptions();
     fetchServices();
     fetchCustomers();
@@ -625,7 +626,7 @@ export default function SubscriptionsPage() {
             return (
               <div className="bg-amber-50 p-4 rounded-xl border-2 border-amber-200">
                 <p className="text-amber-700 text-sm">⚠️ Slot ini belum memiliki link invite.</p>
-                <p className="text-amber-600 text-xs mt-1">Klik "Kelola Link" untuk menambahkan link terlebih dahulu.</p>
+                <p className="text-amber-600 text-xs mt-1">Klik &quot;Kelola Link&quot; untuk menambahkan link terlebih dahulu.</p>
               </div>
             );
           })()}
@@ -752,7 +753,7 @@ export default function SubscriptionsPage() {
             ) : (
               <div className="mt-4 p-3 bg-amber-50 rounded-lg border border-amber-200">
                 <p className="text-amber-700 text-sm">Belum ada link invite untuk slot ini.</p>
-                <p className="text-amber-600 text-xs mt-1">Klik "Kelola Link" untuk menambahkan link invite.</p>
+                <p className="text-amber-600 text-xs mt-1">Klik &quot;Kelola Link&quot; untuk menambahkan link invite.</p>
               </div>
             )}
           </div>
@@ -764,7 +765,6 @@ export default function SubscriptionsPage() {
                   <Button
                     variant="secondary"
                     onClick={() => {
-                      const message = encodeURIComponent(`Hai ${selectedSlotDetail.customer?.name}! Berikut link invite kamu:\n${selectedSlotDetail.invite_link}`);
                       window.open(`https://t.me/${selectedSlotDetail.customer?.telegram_username}`, '_blank');
                     }}
                   >

@@ -1,9 +1,30 @@
-import { NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
 import { successResponse, errorResponse } from '@/lib/api';
 
+type RevenueByServicePayment = {
+  amount: number | string;
+  status: string;
+  customer_subscription?: {
+    subscription?: {
+      service?: {
+        display_name?: string;
+      };
+    };
+  };
+};
+
+type RecentTransaction = {
+  amount: number | string;
+  paid_date: string;
+  customer_subscription?: {
+    customer?: {
+      name?: string;
+    };
+  };
+};
+
 // GET /api/payments/summary - Get payment summary stats
-export async function GET(request: Request) {
+export async function GET() {
   try {
     const now = new Date();
     const firstDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
@@ -58,8 +79,8 @@ export async function GET(request: Request) {
       .lte('due_date', lastDayOfMonth.toISOString().split('T')[0]);
 
     const serviceRevenueMap = new Map<string, number>();
-    revenueByService?.forEach(p => {
-      const serviceName = (p as any).customer_subscription?.subscription?.service?.display_name || 'Unknown';
+    (revenueByService as unknown as RevenueByServicePayment[] | null)?.forEach(p => {
+      const serviceName = p.customer_subscription?.subscription?.service?.display_name || 'Unknown';
       if (p.status === 'paid') {
         serviceRevenueMap.set(serviceName, (serviceRevenueMap.get(serviceName) || 0) + Number(p.amount));
       }
@@ -98,8 +119,8 @@ export async function GET(request: Request) {
         service,
         amount,
       })),
-      recent_transactions: recentTransactions?.map(t => ({
-        customer: (t as any).customer_subscription?.customer?.name,
+      recent_transactions: (recentTransactions as unknown as RecentTransaction[] | null)?.map(t => ({
+        customer: t.customer_subscription?.customer?.name,
         amount: t.amount,
         paid_date: t.paid_date,
       })) || [],

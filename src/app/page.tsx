@@ -1,6 +1,5 @@
 'use client';
 
-import { useEffect, useState } from 'react';
 import { useDashboard } from '@/components/dashboard-context';
 import { Card } from '@/components/ui';
 import {
@@ -15,37 +14,6 @@ import Link from 'next/link';
 
 export default function DashboardPage() {
   const { stats, refreshStats, loading } = useDashboard();
-  const [recentActivity, setRecentActivity] = useState<any[]>([]);
-
-  useEffect(() => {
-    const fetchActivity = async () => {
-      const [customersRes, paymentsRes] = await Promise.all([
-        fetch('/api/customers?limit=5'),
-        fetch('/api/payments?limit=5'),
-      ]);
-
-      if (customersRes.ok && paymentsRes.ok) {
-        const customers = await customersRes.json();
-        const payments = await paymentsRes.json();
-        setRecentActivity([
-          ...(customers.data || []).map((c: any) => ({
-            type: 'customer',
-            name: c.name,
-            date: c.created_at,
-          })),
-          ...(payments.data || []).map((p: any) => ({
-            type: 'payment',
-            name: (p as any).customer_subscription?.customer?.name || 'Tidak Dikenal',
-            amount: p.amount,
-            status: p.status,
-            date: p.created_at,
-          })),
-        ].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()).slice(0, 10));
-      }
-    };
-
-    fetchActivity();
-  }, []);
 
   if (loading) {
     return (

@@ -6,6 +6,21 @@ import { successResponse, errorResponse } from '@/lib/api';
 const XOFTWARE_API_URL = 'https://backend-s2.xoftware.id/v1';
 const XOFTWARE_API_KEY = process.env.XOFTWARE_API_KEY || '';
 
+type XoftwareQRISResponse = {
+  success: boolean;
+  data?: {
+    transaction_id: string;
+    reff_id: string;
+    amount: number;
+    total_to_pay: number;
+    qr_string: string;
+    link: string;
+    expired_at: string;
+    status: string;
+  };
+  error?: string;
+};
+
 // POST /api/telegram/create-order - Create order and generate QRIS
 export async function POST(request: Request) {
   try {
@@ -102,7 +117,7 @@ export async function POST(request: Request) {
       }),
     });
 
-    const xoftwareData = await xoftwareResponse.json();
+    const xoftwareData = await xoftwareResponse.json() as XoftwareQRISResponse;
 
     // Handle specific Xoftware errors
     if (!xoftwareData.success) {
@@ -131,41 +146,79 @@ export async function POST(request: Request) {
     const qris = xoftwareData.data;
 
     // Find or create pending subscription
-    let { data: pendingSub } = await supabaseAdmin
-      .from('customer_subscriptions')
-      .select('*')
-      .eq('customer_id', customer.id)
-      .eq('status', 'pending')
-      .eq('subscription_id', service_id)
-      .single();
+    const { data: serviceSubscriptions } = await supabaseAdmin
+      .from('subscriptions')
+      .select('id')
+      .eq('service_id', service_id);
+
+    const serviceSubscriptionIds = serviceSubscriptions?.map((subscription) => subscription.id) || [];
+
+    let pendingSub = null;
+    if (serviceSubscriptionIds.length > 0) {
+      const { data } = await supabaseAdmin
+        .from('customer_subscriptions')
+        .select('*')
+        .eq('customer_id', customer.id)
+        .eq('status', 'pending')
+        .in('subscription_id', serviceSubscriptionIds)
+        .maybeSingle();
+
+      pendingSub = data;
+    }
+
+    let activeSub = null;
+    if (serviceSubscriptionIds.length > 0) {
+      const { data } = await supabaseAdmin
+        .from('customer_subscriptions')
+        .select('*')
+        .eq('customer_id', customer.id)
+        .eq('status', 'active')
+        .in('subscription_id', serviceSubscriptionIds)
+        .maybeSingle();
+
+      activeSub = data;
+    }
+
+    if (activeSub) {
+      return errorResponse('Customer already has an active subscription for this service', 409);
+    }
 
     // Create pending subscription if not exists
     if (!pendingSub) {
       // Find available slot in subscription
-      const { data: subscription } = await supabaseAdmin
+      const { data: subscriptions } = await supabaseAdmin
         .from('subscriptions')
         .select('*, service:services(*)')
         .eq('service_id', service_id)
         .eq('status', 'active')
-        .single();
+        .order('renewal_date');
 
-      if (!subscription) {
+      if (!subscriptions || subscriptions.length === 0) {
         return errorResponse('No active subscription found for this service', 404);
       }
 
-      // Find available slot
-      const { data: occupiedSlots } = await supabaseAdmin
-        .from('customer_subscriptions')
-        .select('slot_number')
-        .eq('subscription_id', subscription.id)
-        .eq('status', 'active');
+      let selectedSubscription = null;
+      let availableSlot: number | undefined;
 
-      const totalSlots = subscription.service?.total_slots || 6;
-      const occupiedNumbers = occupiedSlots?.map((s: any) => s.slot_number) || [];
-      const availableSlot = Array.from({ length: totalSlots }, (_, i) => i + 1)
-        .find(slot => !occupiedNumbers.includes(slot));
+      for (const subscription of subscriptions) {
+        const { data: occupiedSlots } = await supabaseAdmin
+          .from('customer_subscriptions')
+          .select('slot_number')
+          .eq('subscription_id', subscription.id)
+          .in('status', ['active', 'pending']);
 
-      if (!availableSlot) {
+        const totalSlots = subscription.service?.total_slots || 6;
+        const occupiedNumbers = occupiedSlots?.map((slot) => slot.slot_number) || [];
+        availableSlot = Array.from({ length: totalSlots }, (_, i) => i + 1)
+          .find(slot => !occupiedNumbers.includes(slot));
+
+        if (availableSlot) {
+          selectedSubscription = subscription;
+          break;
+        }
+      }
+
+      if (!selectedSubscription || !availableSlot) {
         return errorResponse('No available slots', 400);
       }
 
@@ -174,7 +227,7 @@ export async function POST(request: Request) {
         .from('customer_subscriptions')
         .insert({
           customer_id: customer.id,
-          subscription_id: subscription.id,
+          subscription_id: selectedSubscription.id,
           slot_number: availableSlot,
           status: 'pending',
           start_date: new Date().toISOString().split('T')[0],

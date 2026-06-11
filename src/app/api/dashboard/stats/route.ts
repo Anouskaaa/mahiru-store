@@ -1,6 +1,25 @@
-import { NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
 import { successResponse, errorResponse } from '@/lib/api';
+
+type ServiceBreakdownSlot = {
+  subscription?: {
+    service?: {
+      display_name?: string;
+    };
+  };
+};
+
+type RevenuePayment = {
+  amount: number | string;
+  status: string;
+  customer_subscription?: {
+    subscription?: {
+      service?: {
+        display_name?: string;
+      };
+    };
+  };
+};
 
 // GET /api/dashboard/stats - Get dashboard overview stats
 export async function GET() {
@@ -51,7 +70,15 @@ export async function GET() {
     // Revenue this month
     const { data: thisMonthPayments } = await supabaseAdmin
       .from('payments')
-      .select('amount, status')
+      .select(`
+        amount,
+        status,
+        customer_subscription:customer_subscriptions(
+          subscription:subscriptions(
+            service:services(display_name)
+          )
+        )
+      `)
       .gte('due_date', firstDayOfMonth)
       .lte('due_date', lastDayOfMonth);
 
@@ -91,17 +118,17 @@ export async function GET() {
       .eq('status', 'active');
 
     const serviceMap = new Map<string, { active_slots: number; revenue: number }>();
-    serviceData?.forEach(s => {
-      const serviceName = (s as any).subscription?.service?.display_name || 'Unknown';
+    (serviceData as unknown as ServiceBreakdownSlot[] | null)?.forEach(s => {
+      const serviceName = s.subscription?.service?.display_name || 'Unknown';
       const current = serviceMap.get(serviceName) || { active_slots: 0, revenue: 0 };
       current.active_slots++;
       serviceMap.set(serviceName, current);
     });
 
     // Add revenue per service
-    thisMonthPayments?.forEach(p => {
+    (thisMonthPayments as unknown as RevenuePayment[] | null)?.forEach(p => {
       if (p.status === 'paid') {
-        const serviceName = (p as any).customer_subscription?.subscription?.service?.display_name || 'Unknown';
+        const serviceName = p.customer_subscription?.subscription?.service?.display_name || 'Unknown';
         const current = serviceMap.get(serviceName) || { active_slots: 0, revenue: 0 };
         current.revenue += Number(p.amount);
         serviceMap.set(serviceName, current);

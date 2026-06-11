@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Table, Badge, Button, Modal, Input, Select } from '@/components/ui';
 import { Plus, DollarSign, AlertTriangle, CheckCircle, Clock, QrCode, Copy, ExternalLink, RefreshCw } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
@@ -17,9 +17,32 @@ interface QRISPaymentData {
   status: string;
 }
 
+interface PaymentWithRelations extends Payment {
+  qris_data?: QRISPaymentData;
+  customer_subscription?: {
+    customer?: {
+      name?: string;
+    };
+    subscription?: {
+      service?: {
+        display_name?: string;
+      };
+    };
+  };
+}
+
+interface PaymentSummary {
+  this_month: {
+    total_collected: number;
+    total_pending: number;
+    total_overdue: number;
+  };
+  growth: number;
+}
+
 export default function PaymentsPage() {
-  const [payments, setPayments] = useState<Payment[]>([]);
-  const [summary, setSummary] = useState<any>(null);
+  const [payments, setPayments] = useState<PaymentWithRelations[]>([]);
+  const [summary, setSummary] = useState<PaymentSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState<string>('');
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -38,8 +61,7 @@ export default function PaymentsPage() {
     paid_date: '',
   });
 
-  const fetchPayments = async () => {
-    setLoading(true);
+  const fetchPayments = useCallback(async () => {
     try {
       const url = statusFilter
         ? `/api/payments?status=${statusFilter}`
@@ -53,9 +75,9 @@ export default function PaymentsPage() {
       console.error('Gagal mengambil pembayaran:', err);
     }
     setLoading(false);
-  };
+  }, [statusFilter]);
 
-  const fetchSummary = async () => {
+  const fetchSummary = useCallback(async () => {
     try {
       const res = await fetch('/api/payments/summary');
       if (res.ok) {
@@ -65,12 +87,13 @@ export default function PaymentsPage() {
     } catch (err) {
       console.error('Gagal mengambil ringkasan:', err);
     }
-  };
+  }, []);
 
   useEffect(() => {
-    fetchPayments();
-    fetchSummary();
-  }, [statusFilter]);
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void fetchPayments();
+    void fetchSummary();
+  }, [fetchPayments, fetchSummary]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -114,7 +137,7 @@ export default function PaymentsPage() {
     setCreatingQRIS(true);
     try {
       // If payment already has qris_data, use that
-      const existingQRIS = (selectedPayment as any).qris_data;
+      const existingQRIS = (selectedPayment as PaymentWithRelations).qris_data;
       if (existingQRIS && existingQRIS.qr_string) {
         setQrisData({
           transaction_id: selectedPayment.transaction_ref || existingQRIS.transaction_id,
@@ -287,15 +310,13 @@ export default function PaymentsPage() {
           {payments.map((payment) => {
             const badge = getStatusBadge(payment.status);
             const StatusIcon = badge.icon;
-            const hasQRIS = (payment as any).qris_data?.qr_string;
-
             return (
               <tr key={payment.id} className="hover:bg-blue-50">
                 <td className="px-6 py-5 font-bold text-lg text-slate-800">
-                  {(payment as any).customer_subscription?.customer?.name || 'Tidak Dikenal'}
+                  {payment.customer_subscription?.customer?.name || 'Tidak Dikenal'}
                 </td>
                 <td className="px-6 py-5 text-base text-slate-700">
-                  {(payment as any).customer_subscription?.subscription?.service?.display_name || 'Tidak Dikenal'}
+                  {payment.customer_subscription?.subscription?.service?.display_name || 'Tidak Dikenal'}
                 </td>
                 <td className="px-6 py-5 font-bold text-xl text-blue-700">
                   Rp {Number(payment.amount).toLocaleString('id-ID')}

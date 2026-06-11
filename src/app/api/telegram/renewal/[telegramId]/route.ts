@@ -6,6 +6,15 @@ interface RouteParams {
   params: Promise<{ telegramId: string }>;
 }
 
+type RenewalSubscription = {
+  subscription?: {
+    renewal_date?: string;
+    service?: {
+      display_name?: string;
+    };
+  };
+};
+
 // GET /api/telegram/renewal/[telegramId] - Check renewal dates via Telegram
 export async function GET(request: Request, { params }: RouteParams) {
   try {
@@ -47,13 +56,13 @@ export async function GET(request: Request, { params }: RouteParams) {
 
     const today = new Date();
 
-    const subscriptionsWithDays = subscriptions?.map(sub => {
-      const renewalDate = new Date((sub as any).subscription?.renewal_date);
+    const subscriptionsWithDays = (subscriptions as unknown as RenewalSubscription[] | null)?.map(sub => {
+      const renewalDate = new Date(sub.subscription?.renewal_date || '');
       const daysUntil = Math.ceil((renewalDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
 
       return {
-        service: (sub as any).subscription?.service?.display_name,
-        renewal_date: (sub as any).subscription?.renewal_date,
+        service: sub.subscription?.service?.display_name,
+        renewal_date: sub.subscription?.renewal_date,
         days_until_renewal: daysUntil,
         status: daysUntil <= 7 ? 'urgent' : daysUntil <= 30 ? 'soon' : 'ok',
       };

@@ -36,6 +36,7 @@ export function DashboardProvider({ children }: { children: ReactNode }) {
   };
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     refreshStats().then(() => setLoading(false));
 
     // Refresh stats every 5 minutes

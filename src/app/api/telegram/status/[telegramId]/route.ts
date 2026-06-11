@@ -6,6 +6,20 @@ interface RouteParams {
   params: Promise<{ telegramId: string }>;
 }
 
+type CustomerSubscriptionStatus = {
+  slot_number: number;
+  status: string;
+  next_payment?: {
+    amount: number | string;
+    due_date: string;
+  };
+  subscription?: {
+    service?: {
+      display_name?: string;
+    };
+  };
+};
+
 // GET /api/telegram/status/[telegramId] - Get customer status via Telegram
 export async function GET(request: Request, { params }: RouteParams) {
   try {
@@ -59,13 +73,13 @@ export async function GET(request: Request, { params }: RouteParams) {
       customer: {
         name: customer.name,
         active_subscriptions: subscriptions?.map(s => ({
-          service: (s as any).subscription?.service?.display_name,
-          slot_number: s.slot_number,
-          status: s.status,
-          next_payment: s.next_payment ? {
-            amount: s.next_payment.amount,
-            due_date: s.next_payment.due_date,
-          } : null,
+        service: (s as unknown as CustomerSubscriptionStatus).subscription?.service?.display_name,
+        slot_number: s.slot_number,
+        status: s.status,
+        next_payment: (s as unknown as CustomerSubscriptionStatus).next_payment ? {
+          amount: (s as unknown as CustomerSubscriptionStatus).next_payment!.amount,
+          due_date: (s as unknown as CustomerSubscriptionStatus).next_payment!.due_date,
+        } : null,
         })) || [],
       },
     });
